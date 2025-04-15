@@ -1,48 +1,76 @@
+using Pkg
 using Test
 using Printf
 using Random
 using PEPSKit
 using TensorKit
+using JLD2
+using OptimKit
+using KrylovKit
+
+function custom_finalize(name, (peps, envs), f, g, numiter)
+    file = jldopen(name * "_num_$(numiter).jld2", "w")
+    file["peps"] = peps
+    file["envs"] = envs
+    file["f"] = f
+    file["g"] = g
+    return (peps, envs), f, g
+end
 
 # random initialization of 2x2 iPEPS with weights and CTMRGEnv (using real numbers)
-Dcut = 8
-particle_symmetry, spin_symmetry = U1Irrep, U1Irrep
+Dcut = 2
+χenv = 12
+t, U = 1, 6
+
+particle_symmetry, spin_symmetry = Trivial, U1Irrep
 N1, N2 = 2, 2
 Random.seed!(10)
-if symm == Trivial
-    Pspace = Vect[fℤ₂](0 => 2, 1 => 2)
-    Vspace = Vect[fℤ₂](0 => Dcut / 2, 1 => Dcut / 2)
-elseif (particle_symmetry == U1Irrep) && (spin_symmetry == U1Irrep)
-    # Pspace = Vect[fℤ₂ ⊠ U1Irrep ⊠ U1Irrep]((0,-1,0) => 1, (1,0,1//2) => 1, (1,0,-1//2) => 1, (0,1,0) => 1)
-    Pspace = Vect[fℤ₂ ⊠ U1Irrep ⊠ U1Irrep]((0,0,0) => 1, (1,1,1//2) => 1, (1,1,-1//2) => 1, (0,2,0) => 1)
-    Vspace = Vect[fℤ₂ ⊠ U1Irrep ⊠ U1Irrep]((0,0,0) => 1, (1,1,1//2) => 1, (1,1,-1//2) => 1, (0,2,0) => 1, (1,3,1//2) => 1, (1,3,-1//2) => 1)
+
+if (particle_symmetry == Trivial) && (spin_symmetry == Trivial)
+    Espace = Vect[fℤ₂](0 => χenv / 2, 1 => χenv / 2)
+elseif (particle_symmetry == Trivial) && (spin_symmetry == U1Irrep)
+    Espace = Vect[fℤ₂ ⊠ U1Irrep]((0, 0) => χenv)
 else
     error("Not implemented")
 end
 
-peps = InfinitePEPS(rand, Float64, Pspace, Vspace; unitcell=(N1, N2))
-spaces = fill(Pspace, N1, N2)
+ctm_alg = SequentialCTMRG(; maxiter=300, tol=1e-7, projector_alg = HalfInfiniteProjector, trscheme = truncdim(dim(Espace)))
 
-χ = 5
-envs0 = CTMRGEnv(randn, Float64, peps, Vspace)
-trscheme = truncerr(1e-9) & truncdim(χ)
-ctm_alg = CTMRG(;
-    maxiter=40, tol=1e-10, verbosity=3, trscheme=trscheme, ctmrgscheme=:sequential
-)
-envs = leading_boundary(envs0, peps, ctm_alg)
+with_CTMRG = false
+
+if with_CTMRG
+    name = "Hubbard_SU_t_$(t)_U_$(U)_D_$(Dcut)_chienv_$(χenv)"
+    file = jldopen(name * ".jld2", "r")
+    peps = file["peps"]
+    envs = file["envs"]
+else
+    name = "Hubbard_SU_t_$(t)_U_$(U)_D_$(Dcut)_chienv_$(χenv)_wo_CTMRG"
+    file = jldopen(name * ".jld2", "r")
+    peps = file["peps"]
+    envs0 = CTMRGEnv(randn, Float64, peps, Espace)
+    envs = leading_boundary(envs0, peps, ctm_alg)
+end
+close(file)
+
+finalize! = ((peps, envs), f, g, numiter) -> custom_finalize(name, (peps, envs), f, g, numiter)
 
 ham = hubbard_model(Float64, particle_symmetry, spin_symmetry, InfiniteSquare(N1, N2); t=t, U=U, mu=U / 2);
 
 
 opt_alg = PEPSOptimize(;
     boundary_alg=ctm_alg,
-    optimizer=LBFGS(4; maxiter=5, gradtol=1e-3, verbosity=2),
-    gradient_alg=LinSolver(; solver=GMRES(; tol=1e-6), iterscheme=:fixed),
+    optimizer=LBFGS(4; maxiter=100, gradtol=1e-3, verbosity=2),
+    gradient_alg=LinSolver(; solver=GMRES(; tol=1e-6), iterscheme=:diffgauge),
     reuse_env=true,
 )
-result = fixedpoint(peps, ham, opt_alg, envs)
-result.E
+result = fixedpoint(peps, ham, opt_alg, envs; finalize! = finalize!)
+println("E = $(result.E)")
 
+file = jldopen(name * "_converged_CTMRG.jld2", "w")
+file["peps"] = result.peps
+file["envs"] = result.env
+file["E"] = result.E
+close(file)
 
 """
 ham_t = hubbard_model(Float64, particle_symmetry, spin_symmetry, InfiniteSquare(N1, N2); t=t, U=0, mu=0);
