@@ -36,12 +36,12 @@ if (particle_symmetry == Trivial) && (spin_symmetry == Trivial)
 elseif (particle_symmetry == Trivial) && (spin_symmetry == U1Irrep)
     # Vspace = Vect[fℤ₂ ⊠ U1Irrep]((0, 0) => floor(Dcut/2), (1, 1 // 2) => floor(Dcut/4), (1, -1 // 2) => floor(Dcut/4))
     # Espaces = [Vect[fℤ₂ ⊠ U1Irrep]((0, 0) => floor(χ/2), (1, 1 // 2) => floor(χ/4), (1, -1 // 2) => floor(χ/4)) for χ = [χenv0, χenv]]
-    Vspace = Vect[fℤ₂ ⊠ U1Irrep]((0, 0) => Dcut)
-    Espace = Vect[fℤ₂ ⊠ U1Irrep]((0, 0) => χenv)
+    Vspace = Vect[fℤ₂⊠U1Irrep]((0, 0) => Dcut)
+    Espace = Vect[fℤ₂⊠U1Irrep]((0, 0) => χenv)
 else
     error("Not implemented")
 end
-peps = InfiniteWeightPEPS(rand, Float64, Pspace, Vspace; unitcell=(N1, N2))
+peps = InfiniteWeightPEPS(rand, Float64, Pspace, Vspace; unitcell = (N1, N2))
 
 # normalize vertex tensors
 for ind in CartesianIndices(peps.vertices)
@@ -49,7 +49,15 @@ for ind in CartesianIndices(peps.vertices)
 end
 
 # Hubbard model Hamiltonian at half-filling
-ham = hubbard_model(Float64, particle_symmetry, spin_symmetry, InfiniteSquare(N1, N2); t, U, mu=U / 2)
+ham = hubbard_model(
+    Float64,
+    particle_symmetry,
+    spin_symmetry,
+    InfiniteSquare(N1, N2);
+    t,
+    U,
+    mu = U / 2,
+)
 
 function do_SU(peps, ham, Espace, Dcut)
     # simple update
@@ -57,10 +65,10 @@ function do_SU(peps, ham, Espace, Dcut)
     tols = [1e-6, 1e-8, 1e-8, 1e-8]
     maxiter = 5000
     for (n, (dt, tol)) in enumerate(zip(dts, tols))
-        println(summary(InfinitePEPS(peps)[1,1]))
+        println(summary(InfinitePEPS(peps)[1, 1]))
         trscheme = truncerr(1e-10) & truncdim(Dcut)
         alg = SimpleUpdate(dt, tol, maxiter, trscheme)
-        peps, = simpleupdate(peps, ham, alg; bipartite=false)
+        peps, = simpleupdate(peps, ham, alg; bipartite = false)
     end
 
     # absorb weight into site tensors
@@ -72,7 +80,12 @@ function do_SU(peps, ham, Espace, Dcut)
     close(file)
     # CTMRG
     envs = CTMRGEnv(randn, Float64, peps, Espace)
-    ctm_alg = SequentialCTMRG(; maxiter=300, tol=1e-7, projector_alg = HalfInfiniteProjector, trscheme = truncdim(dim(Espace)))
+    ctm_alg = SequentialCTMRG(;
+        maxiter = 300,
+        tol = 1e-7,
+        projector_alg = HalfInfiniteProjector,
+        trscheme = truncdim(dim(Espace)),
+    )
     envs = leading_boundary(envs, peps, ctm_alg)
     println("envs = $(summary(envs.edges[1,1,1]))")
     E = costfun(peps, envs, ham) / (N1 * N2)
@@ -98,4 +111,4 @@ E_exact = Es_exact[U] - U / 2
 # measure energy
 @info "Energy           = $E"
 @info "Benchmark energy = $E_exact"
-@test isapprox(E, E_exact; atol=5e-2)
+@test isapprox(E, E_exact; atol = 5e-2)
